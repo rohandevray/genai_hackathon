@@ -5,6 +5,10 @@ import { useNavigate } from "react-router-dom";
 import styles from "./FileUpload.module.css";
 import { FaSpinner } from "react-icons/fa";
 import { HiArrowNarrowRight } from "react-icons/hi";
+import { toast } from "react-toastify";
+import { ref, uploadBytesResumable, getDownloadURL } from "firebase/storage";
+import { collection, addDoc } from "firebase/firestore";
+import { storage, db } from "./firebase";
 
 const compliancesList = ["FDA", "IEC 62304", "ISO 9001", "ISO 13485", "ISO 27001"];
 const dummyRequirements = ["Requirement 1", "Requirement 2", "Requirement 3"];
@@ -14,9 +18,12 @@ export default function FileUpload() {
   const [testCaseInput, setTestCaseInput] = useState("");
   const [selectedFiles, setSelectedFiles] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [fileURLs, setFileURLs] = useState([]);
+  const [progress, setProgress] = useState(0);
   const navigate = useNavigate();
+  
 
-  const handleComplianceToggle = (compliance) => {
+ const handleComplianceToggle = (compliance) => {
     if (selectedCompliances.includes(compliance)) {
       setSelectedCompliances(selectedCompliances.filter((c) => c !== compliance));
     } else {
@@ -24,67 +31,88 @@ export default function FileUpload() {
     }
   };
 
-  const handleProceed = () => {
-    // ✅ text is always required
-    if (testCaseInput.trim() === "") {
-      alert("⚠ Please enter specifications before proceeding!");
-      return;
-    }
+const handleProceed = () => {
+  // ✅ text is always required
+  if (testCaseInput.trim() === "") {
+    toast.warn("Please describe specifications to proceed!");
+    return;
+  }
 
-    // ✅ Case 1: Manual Specs (no file upload → needs compliance)
-    if (selectedFiles.length === 0) {
-      if (selectedCompliances.length === 0) {
-        alert("⚠ Please select at least one compliance when not uploading files!");
-        return;
-      }
+  // ✅ At least compliance OR file required
+  if (selectedCompliances.length === 0 && selectedFiles.length === 0) {
+    toast.warn("Please select at least one compliance OR upload files!");
+    return;
+  }
 
-      navigate("/markdown", {
-        state: {
-          requirements: dummyRequirements,
-          compliance: selectedCompliances.join(", "),
-          testCases: testCaseInput.trim(),
-          uploadedFiles: [],
-        },
-      });
-      return;
-    }
-
-    // ✅ Case 2: File Upload (compliances optional)
-    if (selectedFiles.length > 0) {
-      navigate("/markdown", {
-        state: {
-          requirements: dummyRequirements,
-          compliance: selectedCompliances.length > 0 ? selectedCompliances.join(", ") : "Not Selected",
-          testCases: testCaseInput.trim(),
-          uploadedFiles: selectedFiles.map((file) => file.name),
-        },
-      });
-    }
-  };
-
+  // Proceed with navigation
+  navigate("/markdown", {
+    state: {
+      requirements: dummyRequirements,
+      compliance:
+        selectedCompliances.length > 0
+          ? selectedCompliances.join(", ")
+          : "Not Selected",
+      testCases: testCaseInput.trim(),
+      uploadedFiles: selectedFiles.map((file) => file.name),
+    },
+  });
+};
   const handleUploadLocal = (event) => {
+    // const files = Array.from(event.target.files);
     const files = Array.from(event.target.files);
-    if (files.length > 0) {
-      setLoading(true);
-      setTimeout(() => {
-        setSelectedFiles(files);
+
+    if (files.length === 0)  return;
+
+    setLoading(true);
+    setProgress(0);
+    console.log("Uploading files:", files.map(file => file.name));
+
+
+    const file = files[0]; // Only upload the first file for simplicit
+    const storageRef = ref(storage, `uploads/${Date.now()}-${file.name}`);
+    const uploadTask = uploadBytesResumable(storageRef, file);
+
+    uploadTask.on(
+      "state_changed",
+      (snapshot) => {   
+        const percent = Math.round((snapshot.bytesTransferred / snapshot.totalBytes) * 100);
+        setProgress(percent);
+        console.log(`Upload is ${percent}% done`);
+      },
+      (error) => {
+        console.error("Upload failed:", error);     
+        toast.error("Upload failed!");
         setLoading(false);
-      }, 2000);
-    }
+      },
+      async () => {
+       const downloadURL = await getDownloadURL(uploadTask.snapshot.ref);
+       console.log("✅ File uploaded:", downloadURL);
+        setFileURLs((prev) => [...prev, downloadURL]);
+        // You can also save metadata to Firestore here if needed 
+        setSelectedFiles([file]);
+        setLoading(false);
+        toast.success("File uploaded successfully!");
+     }
+    );
+
   };
+
 
   const handleUploadedFileClick = () => {
-    if (selectedFiles.length > 0) {
-      navigate("/markdown", {
-        state: {
-          requirements: dummyRequirements,
-          compliance: selectedCompliances.length > 0 ? selectedCompliances.join(", ") : "Not Selected",
-          testCases: testCaseInput.trim(),
-          uploadedFiles: selectedFiles.map((file) => file.name),
-        },
-      });
-    }
-  };
+  if (fileURLs.length > 0) {
+    navigate("/markdown", {
+      state: {
+        requirements: dummyRequirements,
+        compliance:
+          selectedCompliances.length > 0
+            ? selectedCompliances.join(", ")
+            : "Not Selected",
+        testCases: testCaseInput.trim(),
+        uploadedFiles: selectedFiles.map((file) => file.url), // ✅ real GCS URLs stored in Firestore
+      },
+    });
+  }
+};
 
   const truncateFileNames = (files, maxLength = 25) => {
     if (files.length === 0) return "Upload Local Files (Optional)";
@@ -117,7 +145,7 @@ export default function FileUpload() {
         <label className={styles.label}>Select Compliances:</label>
         <div className={styles.multiSelectContainer}>
           {compliancesList.map((compliance) => {
-            const isDisabled = selectedFiles.length > 0;
+  
             return (
             <motion.button
               key={compliance}
@@ -126,7 +154,6 @@ export default function FileUpload() {
               }`}
               whileTap={{ scale: 0.95 }}
               onClick={() => handleComplianceToggle(compliance)}
-              disabled={isDisabled}
             >
               {compliance}
             </motion.button>

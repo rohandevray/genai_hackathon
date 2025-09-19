@@ -90,3 +90,37 @@
   font-weight: 700;
   margin-top: 1rem;
 }
+
+.promptContainer {
+  margin-top: 2rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  max-width: 600px;
+  width: 100%;
+  align-items: center; /* center everything horizontally */
+  text-align: center;  /* center the heading text */
+}
+
+.promptBox {
+  width: 100%;
+  min-height: 120px;
+  padding: 1rem;
+  border: 2px solid #cbd5e1;
+  border-radius: 8px;
+  font-size: 1rem;
+  resize: vertical;
+}
+.submitBtn {
+  padding: 0.6rem 1.5rem;
+  background-color: #2563eb;
+  color: white;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  font-weight: 600;
+  align-self: center; /* center the submit button */
+}
+.submitBtn:hover {
+  background-color: #1e40af;
+}

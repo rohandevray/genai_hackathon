@@ -1,19 +1,38 @@
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request , Depends  , Form,HTTPException
 from fastapi.responses import RedirectResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+from passlib.context import CryptContext
 import httpx, os
 from dotenv import load_dotenv, find_dotenv
+from sqlalchemy.orm import Session
+from database import SessionLocal, engine, Base 
+from datetime import datetime, timedelta
+from models import User
+import jwt 
+from pydantic import BaseModel
+
+
+
 load_dotenv(find_dotenv())
 app = FastAPI()
+
+Base.metadata.create_all(bind=engine)
+
+origins = ["http://localhost:3000"]  # your frontend
 
 # Allow frontend requests
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # for demo; restrict in prod
+    allow_origins=origins,  # frontend origin
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+Base.metadata.create_all(bind=engine)
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+SECRET_KEY = "supersecretkey"
+ALGORITHM = "HS256"
 
 # 🔑 Load credentials from environment
 CLIENT_ID = os.getenv("ATLASSIAN_CLIENT_ID")
@@ -22,6 +41,60 @@ REDIRECT_URI = os.getenv("ATLASSIAN_REDIRECT_URI")
 
 # In-memory token store (replace with DB for real app)
 user_tokens = {}
+
+
+class UserCreate(BaseModel):
+    name: str
+    email: str
+    password: str
+
+class LoginData(BaseModel):
+    email: str
+    password: str
+
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+
+@app.get("/")
+def test_connection(db: Session = Depends(get_db)):
+    return {"message": "Connected to Cloud SQL postgres!", "db_status": str(db.bind)}    
+
+
+#user authentication
+def create_access_token(data: dict, expires_delta: timedelta | None = None):
+    to_encode = data.copy()
+    expire = datetime.utcnow() + (expires_delta or timedelta(minutes=15))
+    to_encode.update({"exp": expire})
+    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+
+
+@app.post("/signup")
+async def signup(user: UserCreate,request:Request, db: Session = Depends(get_db)):
+    print(await request.body())
+    existing = db.query(User).filter(User.email == user.email).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="Email already registered")
+    hashed_pw = pwd_context.hash(user.password)
+    new_user = User(name=user.name, email=user.email, password=hashed_pw)
+    db.add(new_user)
+    db.commit()
+    db.refresh(new_user)
+    return {"msg": "Signup successful! Please login."}
+
+@app.post("/login")
+def login(user: LoginData, db: Session = Depends(get_db)):
+    db_user = db.query(User).filter(User.email == user.email).first()
+    if not db_user or not pwd_context.verify(user.password, db_user.password):
+        raise HTTPException(status_code=400, detail="Invalid credentials")
+    access_token = jwt.encode({"sub": db_user.email, "exp": datetime.utcnow() + timedelta(minutes=30)}, SECRET_KEY, algorithm=ALGORITHM)
+    return {"access_token": access_token, "token_type": "bearer","username":db_user.name}
+
+
 
 # Step 1: Redirect to Atlassian login/consent
 @app.get("/connect-jira")
@@ -78,7 +151,7 @@ async def jira_callback(code: str):
     user_tokens["cloudid"] = cloudid
 
     # ✅ Redirect back to frontend instead of JSON dump
-    return RedirectResponse("http://localhost:8080/index.html")
+    return RedirectResponse("http://localhost:3000/generated-files?connected=jira")
 
 
 # Step 3: Fetch Jira projects

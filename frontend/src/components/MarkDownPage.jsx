@@ -2,11 +2,15 @@ import { useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import styles from "./MarkDownPage.module.css";
+import { toast, ToastContainer } from "react-toastify";
+import "react-toastify/dist/ReactToastify.css";
 
-const generateDummyMarkdown = (data, compliance) => {
+const generateDummyMarkdown = (data, compliance, prompt) => {
   return `# Test Case Report
 
 **Compliance:** ${compliance || "N/A"}
+
+**Prompt Used:** ${prompt || "Default Instructions"}
 
 ## Uploaded Requirements
 
@@ -14,7 +18,9 @@ ${data.map((req, idx) => `- Requirement ${idx + 1}: ${req}`).join("\n")}
 
 ## Test Cases
 
-${data.map((req, idx) => `- Test Case ${idx + 1} for Requirement ${idx + 1}`).join("\n")}
+${data
+  .map((req, idx) => `- Test Case ${idx + 1} for Requirement ${idx + 1}`)
+  .join("\n")}
 
 ---
 
@@ -29,12 +35,18 @@ export default function MarkdownPage() {
     compliance: "N/A",
   };
 
-  const markdown = generateDummyMarkdown(requirements, compliance);
+  const [prompt, setPrompt] = useState("");
+  const [submittedPrompt, setSubmittedPrompt] = useState(null);
+  const [showPromptInput, setShowPromptInput] = useState(false);
 
   const [showYesNo, setShowYesNo] = useState(true);
   const [showFormatSelect, setShowFormatSelect] = useState(false);
   const [selectedFormats, setSelectedFormats] = useState([]);
-  
+  const [loading, setLoading] = useState(false);
+
+  const [feedbackCount, setFeedbackCount] = useState(0);
+  const maxFeedback = 3;
+
   const fileFormats = ["XML", "Word", "PDF", "Markup"];
 
   const handleYesClick = () => {
@@ -43,22 +55,56 @@ export default function MarkdownPage() {
   };
 
   const handleNoClick = () => {
-    // setShowYesNo(false);
-    // Nothing else happens
+    if (feedbackCount >= maxFeedback) {
+      toast.error("You have reached the maximum limit of feedback submissions.");
+      return;
+    }
+    setShowYesNo(false);
+    setShowPromptInput(true);
+  };
+
+  const handlePromptSubmit = () => {
+    if (!prompt.trim()) {
+      toast.error("Please enter a valid prompt.");
+      return;
+    }
+
+    toast.info("Processing your feedback... This may take a moment.");
+    setLoading(true);
+
+    setTimeout(() => {
+      setSubmittedPrompt(prompt);
+      setFeedbackCount((prev) => prev + 1);
+
+      toast.success("Report regenerated successfully!");
+      setLoading(false);
+
+      // Reset flow
+      setShowPromptInput(false);
+      setPrompt("");
+      setShowYesNo(true);
+      setShowFormatSelect(false);
+      setSelectedFormats([]);
+    }, 7000); // ⏳ simulate backend delay ~13s
   };
 
   const handleFormatToggle = (format) => {
     if (selectedFormats.includes(format)) {
-      setSelectedFormats(selectedFormats.filter(f => f !== format));
+      setSelectedFormats(selectedFormats.filter((f) => f !== format));
     } else {
       setSelectedFormats([...selectedFormats, format]);
     }
   };
 
   const handleGenerateFiles = () => {
-    // For now, just redirect to dummy generated files page
     navigate("/generated-files", { state: { formats: selectedFormats } });
   };
+
+  const markdown = generateDummyMarkdown(
+    requirements,
+    compliance,
+    submittedPrompt
+  );
 
   return (
     <div className={styles.page}>
@@ -76,23 +122,47 @@ export default function MarkdownPage() {
         animate={{ opacity: 1 }}
         transition={{ duration: 0.5 }}
       >
-        {markdown}
+        {loading ? "⏳ Generating new report... Please wait." : markdown}
       </motion.pre>
 
       {/* Yes/No buttons */}
-      {showYesNo && (
+      {showYesNo && !loading && (
         <motion.div
           className={styles.yesNoContainer}
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
         >
-          <button className={styles.yesBtn} onClick={handleYesClick}>Yes</button>
-          <button className={styles.noBtn} onClick={handleNoClick}>No</button>
+          <button className={styles.yesBtn} onClick={handleYesClick}>
+            Yes
+          </button>
+          <button className={styles.noBtn} onClick={handleNoClick}>
+            No
+          </button>
+        </motion.div>
+      )}
+
+      {/* Prompt input on No */}
+      {showPromptInput && !loading && (
+        <motion.div
+          className={styles.promptContainer}
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+        >
+          <h3>Enter your feedback instructions</h3>
+          <textarea
+            className={styles.promptBox}
+            value={prompt}
+            onChange={(e) => setPrompt(e.target.value)}
+            placeholder="Write your custom prompt..."
+          />
+          <button className={styles.submitBtn} onClick={handlePromptSubmit}>
+            Submit
+          </button>
         </motion.div>
       )}
 
       {/* Format selection */}
-      {showFormatSelect && (
+      {showFormatSelect && !loading && (
         <motion.div
           className={styles.formatContainer}
           initial={{ opacity: 0, y: 20 }}
@@ -103,7 +173,9 @@ export default function MarkdownPage() {
             {fileFormats.map((format) => (
               <button
                 key={format}
-                className={`${styles.formatBtn} ${selectedFormats.includes(format) ? styles.selected : ""}`}
+                className={`${styles.formatBtn} ${
+                  selectedFormats.includes(format) ? styles.selected : ""
+                }`}
                 onClick={() => handleFormatToggle(format)}
               >
                 {format}
@@ -118,6 +190,7 @@ export default function MarkdownPage() {
           )}
         </motion.div>
       )}
+
     </div>
   );
 }
